@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Laptop Market</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=Space+Grotesk:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="container">
+      <header class="shop-header">
+        <div>
+          <p class="eyebrow">Laptop Market</p>
+          <h1>Website thuong mai dien tu laptop</h1>
+          <nav class="top-nav">
+            <a href="/">Trang chu</a>
+            <a href="/orders">Don hang</a>
+            <a href="/about">Gioi thieu</a>
+          </nav>
+        </div>
+        <div class="header-right">
+          <button id="seed-btn" class="btn btn-secondary">Them mock</button>
+          <div class="cart-chip">
+            Gio hang: <strong id="cart-count">0</strong>
+          </div>
+        </div>
+      </header>
+
+      <section class="hero">
+        <div>
+          <h2>Deal tuan nay</h2>
+          <p>
+            Chon laptop hoc tap, van phong, gaming voi gia tot va giao nhanh.
+          </p>
+          <div class="category-links">
+            <a class="btn btn-secondary" href="/category/gaming">Gaming</a>
+            <a class="btn btn-secondary" href="/category/office">Van phong</a>
+            <a class="btn btn-secondary" href="/category/creator">Creator</a>
+          </div>
+        </div>
+      </section>
+
+      <section class="content-grid">
+        <aside class="panel sidebar-panel">
+          <h3>Danh muc hang</h3>
+          <div id="brand-filters" class="brand-filters"></div>
+          <button id="clear-brand-btn" class="btn btn-secondary">Bo loc</button>
+        </aside>
+
+        <section class="panel catalog-panel">
+          <div class="toolbar">
+            <input
+              id="search-input"
+              type="text"
+              placeholder="Tim ten, SKU, hang..."
+            />
+            <select id="sort-select">
+              <option value="newest">Moi nhat</option>
+              <option value="price-asc">Gia thap den cao</option>
+              <option value="price-desc">Gia cao den thap</option>
+              <option value="stock-desc">Ton kho nhieu</option>
+            </select>
+          </div>
+          <div id="products-grid" class="products-grid"></div>
+          <div class="pager">
+            <button id="prev-page" class="btn btn-secondary" type="button">
+              Trang truoc
+            </button>
+            <span id="page-info" class="page-info">Trang 1</span>
+            <button id="next-page" class="btn btn-secondary" type="button">
+              Trang sau
+            </button>
+          </div>
+        </section>
+
+        <aside class="panel cart-panel">
+          <h3>Gio hang</h3>
+          <div id="cart-list" class="cart-list"></div>
+
+          <div class="summary-box">
+            <div class="line">
+              <span>Tam tinh</span><strong id="subtotal">0 VND</strong>
+            </div>
+            <div class="line">
+              <span>Phi ship</span><strong id="shipping-fee">0 VND</strong>
+            </div>
+            <div class="line total">
+              <span>Tong cong</span><strong id="grand-total">0 VND</strong>
+            </div>
+          </div>
+
+          <form id="checkout-form" class="checkout-form">
+            <input
+              id="customer-name"
+              type="text"
+              placeholder="Ten khach hang"
+              required
+            />
+            <input
+              id="customer-phone"
+              type="text"
+              placeholder="So dien thoai"
+            />
+            <input
+              id="customer-address"
+              type="text"
+              placeholder="Dia chi giao hang"
+            />
+            <textarea
+              id="order-notes"
+              rows="2"
+              placeholder="Ghi chu don hang"
+            ></textarea>
+
+            <div class="row-2">
+              <select id="payment-method">
+                <option value="cash">Tien mat</option>
+                <option value="vnpay">VNPay</option>
+                <option value="momo">MoMo</option>
+              </select>
+
+              <select id="shipping-provider">
+                <option value="ghn">GHN</option>
+                <option value="ghtk">GHTK</option>
+              </select>
+            </div>
+
+            <div class="row-2">
+              <button
+                id="calc-ship-btn"
+                type="button"
+                class="btn btn-secondary"
+              >
+                Tinh ship
+              </button>
+              <button type="submit" class="btn">Dat hang</button>
+            </div>
+          </form>
+        </aside>
+      </section>
+    </main>
+
+    <div id="toast" class="toast"></div>
+    <script src="app.js" defer></script>
+  </body>
+</html>

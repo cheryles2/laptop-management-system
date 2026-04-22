@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Chi tiet san pham</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=Space+Grotesk:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="container">
+      <header class="shop-header">
+        <div>
+          <p class="eyebrow">Laptop Market</p>
+          <h1>Trang chi tiet san pham</h1>
+          <nav class="top-nav">
+            <a href="/">Trang chu</a>
+            <a href="/orders">Don hang</a>
+            <a href="/about">Gioi thieu</a>
+          </nav>
+        </div>
+        <div class="header-right">
+          <a class="btn btn-secondary" href="/">Quay lai shop</a>
+        </div>
+      </header>
+
+      <p class="breadcrumb" id="breadcrumb">Trang chu / Chi tiet san pham</p>
+
+      <section class="panel detail-panel" id="detail-panel">
+        <div class="empty">Dang tai du lieu san pham...</div>
+      </section>
+
+      <section class="panel" id="review-panel">
+        <h3>Danh gia va binh luan</h3>
+        <div id="rating-summary" class="summary-box"></div>
+        <form
+          id="comment-form"
+          class="checkout-form"
+          style="margin-top: 0.8rem"
+        >
+          <div class="row-2">
+            <input
+              id="comment-name"
+              type="text"
+              placeholder="Ten cua ban"
+              required
+            />
+            <select id="comment-stars">
+              <option value="5">5 sao</option>
+              <option value="4">4 sao</option>
+              <option value="3">3 sao</option>
+              <option value="2">2 sao</option>
+              <option value="1">1 sao</option>
+            </select>
+          </div>
+          <textarea
+            id="comment-content"
+            rows="3"
+            placeholder="Nhan xet ve san pham"
+            required
+          ></textarea>
+          <button type="submit" class="btn">Gui binh luan</button>
+        </form>
+        <div
+          id="comments-list"
+          class="orders-stack"
+          style="margin-top: 0.8rem"
+        ></div>
+      </section>
+
+      <section class="panel" id="related-panel">
+        <h3>San pham lien quan</h3>
+        <div id="related-grid" class="products-grid"></div>
+      </section>
+    </main>
+
+    <div id="toast" class="toast"></div>
+    <script src="product.js" defer></script>
+  </body>
+</html>

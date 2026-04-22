@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Lich su don hang</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=Space+Grotesk:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="container">
+      <header class="shop-header">
+        <div>
+          <p class="eyebrow">Laptop Market</p>
+          <h1>Lich su don hang</h1>
+          <nav class="top-nav">
+            <a href="/">Trang chu</a>
+            <a href="/orders">Don hang</a>
+            <a href="/about">Gioi thieu</a>
+          </nav>
+        </div>
+      </header>
+
+      <section class="panel">
+        <div class="toolbar">
+          <input
+            id="order-search"
+            type="text"
+            placeholder="Tim theo ten khach, so dien thoai..."
+          />
+          <select id="order-sort">
+            <option value="newest">Moi nhat</option>
+            <option value="highest">Gia tri cao nhat</option>
+            <option value="lowest">Gia tri thap nhat</option>
+          </select>
+        </div>
+        <div id="orders-container" class="orders-stack"></div>
+      </section>
+    </main>
+
+    <div id="toast" class="toast"></div>
+    <script src="orders.js" defer></script>
+  </body>
+</html>

@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Ket qua thanh toan</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=Space+Grotesk:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="container">
+      <section class="panel" style="max-width: 700px; margin: 2rem auto">
+        <p class="eyebrow">Payment Return</p>
+        <h1>Ket qua thanh toan</h1>
+        <div
+          id="payment-result-box"
+          class="summary-box"
+          style="margin-top: 1rem"
+        ></div>
+        <div style="margin-top: 1rem">
+          <a class="btn btn-secondary" href="/">Quay lai cua hang</a>
+        </div>
+      </section>
+    </main>
+
+    <script>
+      const box = document.getElementById("payment-result-box");
+      const params = new URLSearchParams(window.location.search);
+      const provider = params.get("provider") || "unknown";
+      const status =
+        params.get("status") || params.get("vnp_ResponseCode") || "unknown";
+      const orderId =
+        params.get("orderId") ||
+        params.get("vnp_TxnRef") ||
+        params.get("orderId") ||
+        "N/A";
+
+      const successCodes = ["success", "00", "0"];
+      const ok = successCodes.includes(String(status).toLowerCase());
+
+      box.innerHTML = `
+        <div class="line"><span>Cong thanh toan</span><strong>${provider.toUpperCase()}</strong></div>
+        <div class="line"><span>Ma don hang</span><strong>${orderId}</strong></div>
+        <div class="line total"><span>Trang thai</span><strong>${ok ? "Thanh cong" : "Dang cho / that bai"}</strong></div>
+      `;
+    </script>
+  </body>
+</html>
