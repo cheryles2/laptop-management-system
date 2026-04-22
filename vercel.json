@@ -1,0 +1,9 @@
+{
+  "experimentalServices": {
+    "web": {
+      "entrypoint": "react-laptop-shop",
+      "framework": "vite",
+      "routePrefix": "/"
+    }
+  }
+}
