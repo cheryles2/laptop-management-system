@@ -10,6 +10,10 @@ const state = {
 };
 
 const CART_STORAGE_KEY = "laptop_market_cart";
+const API_BASE_URL = (
+  window.__API_BASE_URL__ ||
+  "https://laptop-management-system-oy7i.onrender.com"
+).replace(/\/+$/, "");
 
 const currency = new Intl.NumberFormat("vi-VN", {
   style: "currency",
@@ -53,7 +57,11 @@ function slugify(value) {
 }
 
 async function request(url, options = {}) {
-  const response = await fetch(url, {
+  const targetUrl = /^https?:\/\//i.test(url)
+    ? url
+    : `${API_BASE_URL}${url.startsWith("/") ? url : `/${url}`}`;
+
+  const response = await fetch(targetUrl, {
     headers: { "Content-Type": "application/json" },
     ...options,
   });

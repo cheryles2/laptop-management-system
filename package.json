@@ -4,6 +4,7 @@
   "description": "Laptop sales management workspace with separated frontend/backend",
   "main": "backend/server.js",
   "scripts": {
+    "postinstall": "npm install --prefix backend",
     "install:all": "npm install --prefix backend",
     "start": "npm --prefix backend start",
     "dev": "npm --prefix backend dev"

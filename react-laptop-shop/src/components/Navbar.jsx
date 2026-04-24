@@ -1,6 +1,14 @@
 import { Search, ShoppingCart, User } from "lucide-react";
 
-export default function Navbar({ search, onSearchChange, cartCount }) {
+export default function Navbar({
+  search,
+  onSearchChange,
+  cartCount,
+  authUser,
+  onLoginGoogle,
+  onLoginFacebook,
+  onLogout,
+}) {
   return (
     <header className="sticky top-0 z-50 border-b border-white/70 bg-white/85 backdrop-blur-xl">
       <div className="mx-auto flex max-w-7xl items-center gap-4 px-4 py-4 lg:px-6">
@@ -36,10 +44,47 @@ export default function Navbar({ search, onSearchChange, cartCount }) {
               {cartCount}
             </span>
           </button>
-          <button className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-ink shadow-sm transition hover:border-blue-200 hover:bg-blue-50">
-            <User size={18} />
-            <span>Tài khoản</span>
-          </button>
+          {authUser ? (
+            <div className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-blue-600 text-white">
+                <User size={18} />
+              </div>
+              <div className="hidden text-left sm:block">
+                <p className="text-sm font-semibold text-ink">
+                  {authUser.name || "Người dùng"}
+                </p>
+                <p className="text-xs text-slate-500">
+                  {authUser.email || authUser.provider || "Đã đăng nhập"}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={onLogout}
+                className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50"
+              >
+                Đăng xuất
+              </button>
+            </div>
+          ) : (
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={onLoginGoogle}
+                className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-ink shadow-sm transition hover:border-blue-200 hover:bg-blue-50"
+              >
+                <User size={18} />
+                <span>Google</span>
+              </button>
+              <button
+                type="button"
+                onClick={onLoginFacebook}
+                className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-ink shadow-sm transition hover:border-blue-200 hover:bg-blue-50"
+              >
+                <User size={18} />
+                <span>Facebook</span>
+              </button>
+            </div>
+          )}
         </div>
       </div>
 

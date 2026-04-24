@@ -9,6 +9,10 @@ const currency = new Intl.NumberFormat("vi-VN", {
   currency: "VND",
   maximumFractionDigits: 0,
 });
+const API_BASE_URL = (
+  window.__API_BASE_URL__ ||
+  "https://laptop-management-system-oy7i.onrender.com"
+).replace(/\/+$/, "");
 
 const elements = {
   orderSearch: document.getElementById("order-search"),
@@ -18,7 +22,11 @@ const elements = {
 };
 
 async function request(url, options = {}) {
-  const response = await fetch(url, {
+  const targetUrl = /^https?:\/\//i.test(url)
+    ? url
+    : `${API_BASE_URL}${url.startsWith("/") ? url : `/${url}`}`;
+
+  const response = await fetch(targetUrl, {
     headers: { "Content-Type": "application/json" },
     ...options,
   });

@@ -52,6 +52,9 @@ npm start
 
 Copy file backend/.env.example thanh backend/.env va dien API key:
 
+- Database MySQL (Railway/Render): DATABASE_URL
+- Neu nha cung cap bat buoc SSL: DB_SSL=true
+
 - VNPay: VNPAY_TMN_CODE, VNPAY_HASH_SECRET
 - MoMo: MOMO_PARTNER_CODE, MOMO_ACCESS_KEY, MOMO_SECRET_KEY
 - GHN: GHN_TOKEN, GHN_SHOP_ID
@@ -60,3 +63,14 @@ Copy file backend/.env.example thanh backend/.env va dien API key:
 - Facebook OAuth: FACEBOOK_CLIENT_ID, FACEBOOK_CLIENT_SECRET
 
 Neu chua co key, he thong tu dong chay mock mode de test luong nghiep vu.
+
+## Deploy Render + Railway
+
+Dat env cho service backend tren Render:
+
+- BACKEND_URL=https://laptop-management-system-oy7i.onrender.com
+- FRONTEND_URL=<url frontend production>
+- DATABASE_URL=mysql://root:password@host:port/railway
+- DB_SSL=true (neu database bat buoc SSL)
+
+Backend se tu dong tao bang products, orders, order_items va seed du lieu mau khi bang products rong.

@@ -1,13 +1,28 @@
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
+const mysql = require("mysql2/promise");
 const express = require("express");
 const cors = require("cors");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const DATABASE_URL = process.env.DATABASE_URL || process.env.MYSQL_URL;
+
+let dbPool;
 
 function getFrontendUrl(req) {
+  if (req && typeof req.get === "function") {
+    const origin = req.get("origin") || req.get("referer");
+    if (origin) {
+      try {
+        return new URL(origin).origin;
+      } catch {
+        // fall through to env / request host
+      }
+    }
+  }
+
   if (process.env.FRONTEND_URL) {
     return process.env.FRONTEND_URL;
   }
@@ -30,8 +45,6 @@ function getGoogleCallbackUrl(req) {
     `${getBackendUrl(req)}/api/auth/google/callback`
   );
 }
-
-const dataFile = path.join(__dirname, "data", "store.json");
 const frontendDir = path.join(__dirname, "..", "frontend");
 
 const nowIso = new Date().toISOString();
@@ -155,55 +168,189 @@ function createProductFromMock(id, product) {
   };
 }
 
-function seedMissingMockProducts(store) {
+function parseDatabaseUrl(connectionString) {
+  const url = new URL(connectionString);
+  const sslEnabled = String(process.env.DB_SSL || "").toLowerCase() === "true";
+
+  return {
+    host: url.hostname,
+    port: Number(url.port || 3306),
+    user: decodeURIComponent(url.username),
+    password: decodeURIComponent(url.password),
+    database: decodeURIComponent(url.pathname.replace(/^\//, "")),
+    waitForConnections: true,
+    connectionLimit: Number(process.env.DB_POOL_SIZE || 10),
+    decimalNumbers: true,
+    timezone: "Z",
+    ssl: sslEnabled ? { rejectUnauthorized: false } : undefined,
+  };
+}
+
+function getDb() {
+  if (!DATABASE_URL) {
+    throw Object.assign(new Error("DATABASE_URL is missing"), { status: 500 });
+  }
+
+  if (!dbPool) {
+    dbPool = mysql.createPool(parseDatabaseUrl(DATABASE_URL));
+  }
+
+  return dbPool;
+}
+
+async function query(sql, params = []) {
+  const [rows] = await getDb().query(sql, params);
+  return rows;
+}
+
+async function withTransaction(callback) {
+  const connection = await getDb().getConnection();
+  try {
+    await connection.beginTransaction();
+    const result = await callback(connection);
+    await connection.commit();
+    return result;
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
+}
+
+function toIsoDate(value) {
+  if (!value) {
+    return value;
+  }
+
+  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2} /.test(value)) {
+    const utcDate = new Date(value.replace(" ", "T") + "Z");
+    return Number.isNaN(utcDate.getTime()) ? value : utcDate.toISOString();
+  }
+
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? value : parsed.toISOString();
+}
+
+function mapProductRow(row) {
+  return {
+    id: Number(row.id),
+    sku: row.sku,
+    name: row.name,
+    brand: row.brand,
+    price: Number(row.price),
+    stock: Number(row.stock),
+    created_at: toIsoDate(row.created_at),
+  };
+}
+
+function mapOrderRow(row) {
+  return {
+    id: Number(row.id),
+    customer_name: row.customer_name,
+    customer_phone: row.customer_phone,
+    notes: row.notes,
+    payment_method: row.payment_method,
+    payment_status: row.payment_status,
+    shipping_provider: row.shipping_provider,
+    shipping_fee: Number(row.shipping_fee),
+    shipping_address: row.shipping_address,
+    subtotal_amount: Number(row.subtotal_amount),
+    total_amount: Number(row.total_amount),
+    created_at: toIsoDate(row.created_at),
+  };
+}
+
+function mapOrderItemRow(row) {
+  return {
+    id: Number(row.id),
+    order_id: Number(row.order_id),
+    product_id: Number(row.product_id),
+    quantity: Number(row.quantity),
+    unit_price: Number(row.unit_price),
+    line_total: Number(row.line_total),
+    product_name: row.product_name || "Unknown",
+    product_sku: row.product_sku || "N/A",
+  };
+}
+
+async function seedMissingMockProducts(connection = getDb()) {
+  const rows = await connection.query("SELECT sku FROM products");
   const existingSku = new Set(
-    store.products.map((item) => item.sku.toLowerCase()),
+    rows[0].map((item) => String(item.sku).toLowerCase()),
   );
-  let insertedCount = 0;
+  const missingProducts = mockProducts.filter(
+    (item) => !existingSku.has(item.sku.toLowerCase()),
+  );
 
-  for (const item of mockProducts) {
-    if (existingSku.has(item.sku.toLowerCase())) {
-      continue;
-    }
-
-    store.products.push(createProductFromMock(store.nextProductId, item));
-    store.nextProductId += 1;
-    insertedCount += 1;
+  if (missingProducts.length === 0) {
+    return 0;
   }
 
-  return insertedCount;
+  const values = missingProducts.map((item) => [
+    item.sku,
+    item.name,
+    item.brand,
+    item.price,
+    item.stock,
+    nowIso,
+  ]);
+
+  await connection.query(
+    "INSERT INTO products (sku, name, brand, price, stock, created_at) VALUES ?",
+    [values],
+  );
+
+  return missingProducts.length;
 }
 
-const initialStore = {
-  nextProductId: mockProducts.length + 1,
-  nextOrderId: 1,
-  nextOrderItemId: 1,
-  products: mockProducts.map((item, index) =>
-    createProductFromMock(index + 1, item),
-  ),
-  orders: [],
-  orderItems: [],
-};
+async function initializeDatabase() {
+  await query(`
+    CREATE TABLE IF NOT EXISTS products (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      sku VARCHAR(64) NOT NULL UNIQUE,
+      name VARCHAR(255) NOT NULL,
+      brand VARCHAR(120) NOT NULL,
+      price BIGINT NOT NULL,
+      stock INT NOT NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
 
-if (!fs.existsSync(path.dirname(dataFile))) {
-  fs.mkdirSync(path.dirname(dataFile), { recursive: true });
-}
-if (!fs.existsSync(dataFile)) {
-  fs.writeFileSync(dataFile, JSON.stringify(initialStore, null, 2));
-} else {
-  const store = JSON.parse(fs.readFileSync(dataFile, "utf-8"));
-  const insertedCount = seedMissingMockProducts(store);
-  if (insertedCount > 0) {
-    fs.writeFileSync(dataFile, JSON.stringify(store, null, 2));
+  await query(`
+    CREATE TABLE IF NOT EXISTS orders (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      customer_name VARCHAR(255) NOT NULL,
+      customer_phone VARCHAR(50),
+      notes TEXT,
+      payment_method VARCHAR(50) NOT NULL DEFAULT 'cash',
+      payment_status VARCHAR(50) NOT NULL DEFAULT 'pending',
+      shipping_provider VARCHAR(50),
+      shipping_fee BIGINT NOT NULL DEFAULT 0,
+      shipping_address TEXT,
+      subtotal_amount BIGINT NOT NULL,
+      total_amount BIGINT NOT NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS order_items (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      order_id INT NOT NULL,
+      product_id INT NOT NULL,
+      quantity INT NOT NULL,
+      unit_price BIGINT NOT NULL,
+      line_total BIGINT NOT NULL,
+      CONSTRAINT fk_order_items_order FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
+      CONSTRAINT fk_order_items_product FOREIGN KEY (product_id) REFERENCES products(id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  const countRows = await query("SELECT COUNT(*) AS total FROM products");
+  if (Number(countRows[0].total) === 0) {
+    await seedMissingMockProducts();
   }
-}
-
-function readStore() {
-  return JSON.parse(fs.readFileSync(dataFile, "utf-8"));
-}
-
-function writeStore(store) {
-  fs.writeFileSync(dataFile, JSON.stringify(store, null, 2));
 }
 
 function toNumber(value, fallback = 0) {
@@ -245,6 +392,24 @@ function formatVnPayDate(date = new Date()) {
   return `${y}${m}${d}${h}${min}${s}`;
 }
 
+function getAuthRedirectUrl(req, provider, user) {
+  const frontendUrl = getFrontendUrl(req);
+  const url = new URL(frontendUrl);
+  url.searchParams.set("authProvider", provider);
+  url.searchParams.set("authMode", "success");
+  if (user?.name) {
+    url.searchParams.set("authName", user.name);
+  }
+  if (user?.email) {
+    url.searchParams.set("authEmail", user.email);
+  }
+
+  return url.toString();
+}
+
+const asyncHandler = (handler) => (req, res, next) =>
+  Promise.resolve(handler(req, res, next)).catch(next);
+
 app.use(cors());
 app.use(express.json());
 app.use(express.static(frontendDir));
@@ -276,275 +441,362 @@ app.get("/api/integrations/status", (req, res) => {
   });
 });
 
-app.get("/api/products", (req, res) => {
-  const store = readStore();
-  res.json([...store.products].sort((a, b) => b.id - a.id));
-});
+app.get(
+  "/api/products",
+  asyncHandler(async (req, res) => {
+    const rows = await query("SELECT * FROM products ORDER BY id DESC");
+    res.json(rows.map(mapProductRow));
+  }),
+);
 
-app.get("/api/products/:id", (req, res) => {
-  const id = Number(req.params.id);
-  if (!id) {
-    return res.status(400).json({ message: "invalid product id" });
-  }
+app.get(
+  "/api/products/:id",
+  asyncHandler(async (req, res) => {
+    const id = Number(req.params.id);
+    if (!id) {
+      return res.status(400).json({ message: "invalid product id" });
+    }
 
-  const store = readStore();
-  const product = store.products.find((item) => item.id === id);
-  if (!product) {
-    return res.status(404).json({ message: "product not found" });
-  }
+    const rows = await query("SELECT * FROM products WHERE id = ?", [id]);
+    if (rows.length === 0) {
+      return res.status(404).json({ message: "product not found" });
+    }
 
-  return res.json(product);
-});
+    return res.json(mapProductRow(rows[0]));
+  }),
+);
 
-app.post("/api/products/seed-mock", (req, res) => {
-  const store = readStore();
-  const insertedCount = seedMissingMockProducts(store);
-  if (insertedCount > 0) {
-    writeStore(store);
-  }
+app.post(
+  "/api/products/seed-mock",
+  asyncHandler(async (req, res) => {
+    const insertedCount = await seedMissingMockProducts();
+    const rows = await query("SELECT COUNT(*) AS totalProducts FROM products");
 
-  return res.json({ insertedCount, totalProducts: store.products.length });
-});
-
-app.post("/api/products", (req, res) => {
-  const { sku, name, brand, price, stock } = req.body;
-  if (!sku || !name || !brand) {
-    return res
-      .status(400)
-      .json({ message: "sku, name and brand are required" });
-  }
-
-  const store = readStore();
-  const duplicatedSku = store.products.some(
-    (item) => item.sku.toLowerCase() === String(sku).trim().toLowerCase(),
-  );
-  if (duplicatedSku) {
-    return res.status(409).json({ message: "sku already exists" });
-  }
-
-  const numericPrice = toNumber(price);
-  const numericStock = toNumber(stock);
-  if (numericPrice < 0 || numericStock < 0) {
-    return res.status(400).json({ message: "price and stock must be >= 0" });
-  }
-
-  const product = {
-    id: store.nextProductId,
-    sku: String(sku).trim(),
-    name: String(name).trim(),
-    brand: String(brand).trim(),
-    price: numericPrice,
-    stock: numericStock,
-    created_at: new Date().toISOString(),
-  };
-
-  store.nextProductId += 1;
-  store.products.push(product);
-  writeStore(store);
-  return res.status(201).json(product);
-});
-
-app.put("/api/products/:id", (req, res) => {
-  const id = Number(req.params.id);
-  const { sku, name, brand, price, stock } = req.body;
-
-  if (!id || !sku || !name || !brand) {
-    return res
-      .status(400)
-      .json({ message: "id, sku, name and brand are required" });
-  }
-
-  const store = readStore();
-  const index = store.products.findIndex((item) => item.id === id);
-  if (index < 0) {
-    return res.status(404).json({ message: "product not found" });
-  }
-
-  const duplicatedSku = store.products.some(
-    (item) =>
-      item.id !== id &&
-      item.sku.toLowerCase() === String(sku).trim().toLowerCase(),
-  );
-  if (duplicatedSku) {
-    return res.status(409).json({ message: "sku already exists" });
-  }
-
-  const numericPrice = toNumber(price);
-  const numericStock = toNumber(stock);
-  if (numericPrice < 0 || numericStock < 0) {
-    return res.status(400).json({ message: "price and stock must be >= 0" });
-  }
-
-  store.products[index] = {
-    ...store.products[index],
-    sku: String(sku).trim(),
-    name: String(name).trim(),
-    brand: String(brand).trim(),
-    price: numericPrice,
-    stock: numericStock,
-  };
-
-  writeStore(store);
-  return res.json(store.products[index]);
-});
-
-app.delete("/api/products/:id", (req, res) => {
-  const id = Number(req.params.id);
-  if (!id) {
-    return res.status(400).json({ message: "invalid product id" });
-  }
-
-  const store = readStore();
-  if (store.orderItems.some((item) => item.product_id === id)) {
-    return res
-      .status(409)
-      .json({ message: "cannot delete product used in orders" });
-  }
-
-  const before = store.products.length;
-  store.products = store.products.filter((item) => item.id !== id);
-  if (before === store.products.length) {
-    return res.status(404).json({ message: "product not found" });
-  }
-
-  writeStore(store);
-  return res.json({ message: "product deleted" });
-});
-
-app.get("/api/orders", (req, res) => {
-  const store = readStore();
-  const orders = [...store.orders]
-    .sort((a, b) => b.id - a.id)
-    .map((order) => {
-      const items = store.orderItems
-        .filter((item) => item.order_id === order.id)
-        .map((item) => {
-          const product = store.products.find((p) => p.id === item.product_id);
-          return {
-            ...item,
-            product_name: product ? product.name : "Unknown",
-            product_sku: product ? product.sku : "N/A",
-          };
-        });
-      return { ...order, items };
+    return res.json({
+      insertedCount,
+      totalProducts: Number(rows[0].totalProducts || 0),
     });
+  }),
+);
 
-  res.json(orders);
-});
-
-app.post("/api/orders", (req, res) => {
-  const {
-    customerName,
-    customerPhone,
-    notes,
-    items,
-    paymentMethod,
-    shippingProvider,
-    shippingFee,
-    address,
-  } = req.body;
-  if (!customerName || !Array.isArray(items) || items.length === 0) {
-    return res
-      .status(400)
-      .json({ message: "customerName and at least one item are required" });
-  }
-
-  const store = readStore();
-  const normalizedItems = [];
-  let subtotal = 0;
-
-  for (const item of items) {
-    const productId = Number(item.productId);
-    const quantity = Number(item.quantity);
-
-    if (!productId || !quantity || quantity <= 0) {
-      return res.status(400).json({ message: "invalid item payload" });
-    }
-
-    const product = store.products.find((p) => p.id === productId);
-    if (!product) {
+app.post(
+  "/api/products",
+  asyncHandler(async (req, res) => {
+    const { sku, name, brand, price, stock } = req.body;
+    if (!sku || !name || !brand) {
       return res
         .status(400)
-        .json({ message: `product ${productId} not found` });
+        .json({ message: "sku, name and brand are required" });
     }
-    if (product.stock < quantity) {
+
+    const normalizedSku = String(sku).trim();
+    const duplicated = await query(
+      "SELECT id FROM products WHERE LOWER(sku) = LOWER(?) LIMIT 1",
+      [normalizedSku],
+    );
+    if (duplicated.length > 0) {
+      return res.status(409).json({ message: "sku already exists" });
+    }
+
+    const numericPrice = toNumber(price);
+    const numericStock = toNumber(stock);
+    if (numericPrice < 0 || numericStock < 0) {
+      return res.status(400).json({ message: "price and stock must be >= 0" });
+    }
+
+    const result = await query(
+      "INSERT INTO products (sku, name, brand, price, stock, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+      [
+        normalizedSku,
+        String(name).trim(),
+        String(brand).trim(),
+        numericPrice,
+        numericStock,
+        new Date(),
+      ],
+    );
+
+    const rows = await query("SELECT * FROM products WHERE id = ?", [
+      result.insertId,
+    ]);
+    return res.status(201).json(mapProductRow(rows[0]));
+  }),
+);
+
+app.put(
+  "/api/products/:id",
+  asyncHandler(async (req, res) => {
+    const id = Number(req.params.id);
+    const { sku, name, brand, price, stock } = req.body;
+
+    if (!id || !sku || !name || !brand) {
       return res
         .status(400)
-        .json({ message: `insufficient stock for product ${productId}` });
+        .json({ message: "id, sku, name and brand are required" });
     }
 
-    const lineTotal = product.price * quantity;
-    subtotal += lineTotal;
-    normalizedItems.push({ product, quantity, lineTotal });
-  }
+    const productRows = await query("SELECT id FROM products WHERE id = ?", [
+      id,
+    ]);
+    if (productRows.length === 0) {
+      return res.status(404).json({ message: "product not found" });
+    }
 
-  const fee = Math.max(0, toNumber(shippingFee));
-  const order = {
-    id: store.nextOrderId,
-    customer_name: String(customerName).trim(),
-    customer_phone: customerPhone ? String(customerPhone).trim() : null,
-    notes: notes ? String(notes).trim() : null,
-    payment_method: paymentMethod || "cash",
-    payment_status: "pending",
-    shipping_provider: shippingProvider || null,
-    shipping_fee: fee,
-    shipping_address: address ? String(address).trim() : null,
-    subtotal_amount: subtotal,
-    total_amount: subtotal + fee,
-    created_at: new Date().toISOString(),
-  };
+    const duplicatedSku = await query(
+      "SELECT id FROM products WHERE id <> ? AND LOWER(sku) = LOWER(?) LIMIT 1",
+      [id, String(sku).trim()],
+    );
+    if (duplicatedSku.length > 0) {
+      return res.status(409).json({ message: "sku already exists" });
+    }
 
-  store.nextOrderId += 1;
-  store.orders.push(order);
+    const numericPrice = toNumber(price);
+    const numericStock = toNumber(stock);
+    if (numericPrice < 0 || numericStock < 0) {
+      return res.status(400).json({ message: "price and stock must be >= 0" });
+    }
 
-  for (const item of normalizedItems) {
-    const orderItem = {
-      id: store.nextOrderItemId,
-      order_id: order.id,
-      product_id: item.product.id,
-      quantity: item.quantity,
-      unit_price: item.product.price,
-      line_total: item.lineTotal,
-    };
+    await query(
+      "UPDATE products SET sku = ?, name = ?, brand = ?, price = ?, stock = ? WHERE id = ?",
+      [
+        String(sku).trim(),
+        String(name).trim(),
+        String(brand).trim(),
+        numericPrice,
+        numericStock,
+        id,
+      ],
+    );
 
-    store.nextOrderItemId += 1;
-    store.orderItems.push(orderItem);
-    item.product.stock -= item.quantity;
-  }
+    const rows = await query("SELECT * FROM products WHERE id = ?", [id]);
+    return res.json(mapProductRow(rows[0]));
+  }),
+);
 
-  writeStore(store);
+app.delete(
+  "/api/products/:id",
+  asyncHandler(async (req, res) => {
+    const id = Number(req.params.id);
+    if (!id) {
+      return res.status(400).json({ message: "invalid product id" });
+    }
 
-  const responseItems = store.orderItems
-    .filter((item) => item.order_id === order.id)
-    .map((item) => {
-      const product = store.products.find((p) => p.id === item.product_id);
+    const usedRows = await query(
+      "SELECT id FROM order_items WHERE product_id = ? LIMIT 1",
+      [id],
+    );
+    if (usedRows.length > 0) {
+      return res
+        .status(409)
+        .json({ message: "cannot delete product used in orders" });
+    }
+
+    const result = await query("DELETE FROM products WHERE id = ?", [id]);
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ message: "product not found" });
+    }
+
+    return res.json({ message: "product deleted" });
+  }),
+);
+
+app.get(
+  "/api/orders",
+  asyncHandler(async (req, res) => {
+    const orderRows = await query("SELECT * FROM orders ORDER BY id DESC");
+    if (orderRows.length === 0) {
+      return res.json([]);
+    }
+
+    const orderIds = orderRows.map((item) => item.id);
+    const itemRows = await query(
+      `SELECT oi.*, p.name AS product_name, p.sku AS product_sku
+     FROM order_items oi
+     LEFT JOIN products p ON p.id = oi.product_id
+     WHERE oi.order_id IN (?)
+     ORDER BY oi.id ASC`,
+      [orderIds],
+    );
+
+    const groupedItems = new Map();
+    for (const item of itemRows.map(mapOrderItemRow)) {
+      if (!groupedItems.has(item.order_id)) {
+        groupedItems.set(item.order_id, []);
+      }
+      groupedItems.get(item.order_id).push(item);
+    }
+
+    const orders = orderRows.map((order) => ({
+      ...mapOrderRow(order),
+      items: groupedItems.get(order.id) || [],
+    }));
+
+    res.json(orders);
+  }),
+);
+
+app.post(
+  "/api/orders",
+  asyncHandler(async (req, res) => {
+    const {
+      customerName,
+      customerPhone,
+      notes,
+      items,
+      paymentMethod,
+      shippingProvider,
+      shippingFee,
+      address,
+    } = req.body;
+    if (!customerName || !Array.isArray(items) || items.length === 0) {
+      return res
+        .status(400)
+        .json({ message: "customerName and at least one item are required" });
+    }
+
+    const fee = Math.max(0, toNumber(shippingFee));
+
+    const orderResult = await withTransaction(async (connection) => {
+      const normalizedItems = [];
+      let subtotal = 0;
+
+      for (const item of items) {
+        const productId = Number(item.productId);
+        const quantity = Number(item.quantity);
+
+        if (!productId || !quantity || quantity <= 0) {
+          throw Object.assign(new Error("invalid item payload"), {
+            status: 400,
+          });
+        }
+
+        const [productRows] = await connection.query(
+          "SELECT id, sku, name, price, stock FROM products WHERE id = ? FOR UPDATE",
+          [productId],
+        );
+
+        if (productRows.length === 0) {
+          throw Object.assign(new Error(`product ${productId} not found`), {
+            status: 400,
+          });
+        }
+
+        const product = productRows[0];
+        if (Number(product.stock) < quantity) {
+          throw Object.assign(
+            new Error(`insufficient stock for product ${productId}`),
+            { status: 400 },
+          );
+        }
+
+        const lineTotal = Number(product.price) * quantity;
+        subtotal += lineTotal;
+        normalizedItems.push({ product, quantity, lineTotal });
+      }
+
+      const [insertOrderResult] = await connection.query(
+        `INSERT INTO orders (
+        customer_name,
+        customer_phone,
+        notes,
+        payment_method,
+        payment_status,
+        shipping_provider,
+        shipping_fee,
+        shipping_address,
+        subtotal_amount,
+        total_amount,
+        created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          String(customerName).trim(),
+          customerPhone ? String(customerPhone).trim() : null,
+          notes ? String(notes).trim() : null,
+          paymentMethod || "cash",
+          "pending",
+          shippingProvider || null,
+          fee,
+          address ? String(address).trim() : null,
+          subtotal,
+          subtotal + fee,
+          new Date(),
+        ],
+      );
+
+      const orderId = insertOrderResult.insertId;
+
+      for (const item of normalizedItems) {
+        await connection.query(
+          `INSERT INTO order_items (
+          order_id,
+          product_id,
+          quantity,
+          unit_price,
+          line_total
+        ) VALUES (?, ?, ?, ?, ?)`,
+          [
+            orderId,
+            item.product.id,
+            item.quantity,
+            Number(item.product.price),
+            item.lineTotal,
+          ],
+        );
+
+        await connection.query(
+          "UPDATE products SET stock = stock - ? WHERE id = ?",
+          [item.quantity, item.product.id],
+        );
+      }
+
+      const [orderRows] = await connection.query(
+        "SELECT * FROM orders WHERE id = ?",
+        [orderId],
+      );
+      const [itemRows] = await connection.query(
+        `SELECT oi.*, p.name AS product_name, p.sku AS product_sku
+       FROM order_items oi
+       LEFT JOIN products p ON p.id = oi.product_id
+       WHERE oi.order_id = ?
+       ORDER BY oi.id ASC`,
+        [orderId],
+      );
+
       return {
-        ...item,
-        product_name: product ? product.name : "Unknown",
-        product_sku: product ? product.sku : "N/A",
+        ...mapOrderRow(orderRows[0]),
+        items: itemRows.map(mapOrderItemRow),
       };
     });
 
-  return res.status(201).json({ ...order, items: responseItems });
-});
+    return res.status(201).json(orderResult);
+  }),
+);
 
-app.get("/api/dashboard", (req, res) => {
-  const store = readStore();
-  const totalProducts = store.products.length;
-  const totalStock = store.products.reduce((sum, item) => sum + item.stock, 0);
-  const totalOrders = store.orders.length;
-  const revenue = store.orders.reduce(
-    (sum, item) => sum + item.total_amount,
-    0,
-  );
+app.get(
+  "/api/dashboard",
+  asyncHandler(async (req, res) => {
+    const productStatsRows = await query(
+      "SELECT COUNT(*) AS totalProducts, COALESCE(SUM(stock), 0) AS totalStock FROM products",
+    );
+    const orderStatsRows = await query(
+      "SELECT COUNT(*) AS totalOrders, COALESCE(SUM(total_amount), 0) AS revenue FROM orders",
+    );
+    const lowStockRows = await query(
+      "SELECT * FROM products WHERE stock <= 5 ORDER BY stock ASC, id DESC LIMIT 5",
+    );
 
-  const lowStock = [...store.products]
-    .filter((item) => item.stock <= 5)
-    .sort((a, b) => a.stock - b.stock || b.id - a.id)
-    .slice(0, 5);
+    const productStats = productStatsRows[0] || {};
+    const orderStats = orderStatsRows[0] || {};
 
-  res.json({ totalProducts, totalStock, totalOrders, revenue, lowStock });
-});
+    res.json({
+      totalProducts: Number(productStats.totalProducts || 0),
+      totalStock: Number(productStats.totalStock || 0),
+      totalOrders: Number(orderStats.totalOrders || 0),
+      revenue: Number(orderStats.revenue || 0),
+      lowStock: lowStockRows.map(mapProductRow),
+    });
+  }),
+);
 
 app.post("/api/payments/vnpay/create-url", (req, res) => {
   const amount = Math.max(0, toNumber(req.body.amount));
@@ -814,6 +1066,7 @@ app.get("/api/auth/google/url", (req, res) => {
     scope: "openid email profile",
     access_type: "offline",
     prompt: "consent",
+    state: frontendUrl,
   });
 
   return res.json({
@@ -825,16 +1078,19 @@ app.get("/api/auth/google/url", (req, res) => {
 
 app.get("/api/auth/google/callback", async (req, res) => {
   const code = req.query.code;
+  const state = typeof req.query.state === "string" ? req.query.state : "";
   const clientId = process.env.GOOGLE_CLIENT_ID;
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
   const redirectUri = getGoogleCallbackUrl(req);
 
   if (!clientId || !clientSecret || !code) {
-    return res.json({
-      provider: "google",
-      mode: "mock",
-      user: { name: "Demo Google User", email: "google.demo@example.com" },
-    });
+    const targetUrl =
+      state ||
+      getAuthRedirectUrl(req, "google", {
+        name: "Demo Google User",
+        email: "google.demo@example.com",
+      });
+    return res.redirect(targetUrl);
   }
 
   try {
@@ -863,7 +1119,8 @@ app.get("/api/auth/google/callback", async (req, res) => {
       },
     );
     const profile = await profileRes.json();
-    return res.json({ provider: "google", mode: "live", user: profile });
+    const targetUrl = state || getAuthRedirectUrl(req, "google", profile);
+    return res.redirect(targetUrl);
   } catch (error) {
     return res
       .status(400)
@@ -891,6 +1148,7 @@ app.get("/api/auth/facebook/url", (req, res) => {
     redirect_uri: redirectUri,
     scope: "public_profile,email",
     response_type: "code",
+    state: frontendUrl,
   });
 
   return res.json({
@@ -903,6 +1161,8 @@ app.get("/api/auth/facebook/url", (req, res) => {
 app.get("/api/auth/facebook/callback", async (req, res) => {
   const frontendUrl = getFrontendUrl(req);
   const code = req.query.code;
+  const state =
+    typeof req.query.state === "string" ? req.query.state : frontendUrl;
   const clientId = process.env.FACEBOOK_CLIENT_ID;
   const clientSecret = process.env.FACEBOOK_CLIENT_SECRET;
   const redirectUri =
@@ -910,11 +1170,12 @@ app.get("/api/auth/facebook/callback", async (req, res) => {
     `${frontendUrl}/api/auth/facebook/callback`;
 
   if (!clientId || !clientSecret || !code) {
-    return res.json({
-      provider: "facebook",
-      mode: "mock",
-      user: { name: "Demo Facebook User", email: "facebook.demo@example.com" },
-    });
+    return res.redirect(
+      getAuthRedirectUrl(req, "facebook", {
+        name: "Demo Facebook User",
+        email: "facebook.demo@example.com",
+      }),
+    );
   }
 
   try {
@@ -940,7 +1201,7 @@ app.get("/api/auth/facebook/callback", async (req, res) => {
 
     const profileRes = await fetch(profileUrl);
     const profile = await profileRes.json();
-    return res.json({ provider: "facebook", mode: "live", user: profile });
+    return res.redirect(state || getAuthRedirectUrl(req, "facebook", profile));
   } catch (error) {
     return res
       .status(400)
@@ -991,7 +1252,23 @@ app.get("*", (req, res) => {
   return res.status(404).send("Frontend not found");
 });
 
-function startServer(preferredPort) {
+app.use((error, req, res, next) => {
+  const statusCode = Number(error.status || 500);
+  const message =
+    statusCode >= 500
+      ? error.message || "internal server error"
+      : error.message || "request failed";
+
+  if (statusCode >= 500) {
+    console.error(error);
+  }
+
+  res.status(statusCode).json({ message });
+});
+
+async function startServer(preferredPort) {
+  await initializeDatabase();
+
   const port = Number(preferredPort) || 3000;
   const server = app.listen(port, () => {
     console.log(`Server running at http://localhost:${port}`);
@@ -1009,4 +1286,7 @@ function startServer(preferredPort) {
   });
 }
 
-startServer(PORT);
+startServer(PORT).catch((error) => {
+  console.error("Failed to start server", error);
+  process.exit(1);
+});
