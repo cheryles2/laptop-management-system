@@ -1266,12 +1266,18 @@ app.use((error, req, res, next) => {
   res.status(statusCode).json({ message });
 });
 
-async function startServer(preferredPort) {
-  await initializeDatabase();
-
+function startServer(preferredPort) {
   const port = Number(preferredPort) || 3000;
   const server = app.listen(port, () => {
     console.log(`Server running at http://localhost:${port}`);
+
+    initializeDatabase()
+      .then(() => {
+        console.log("Database initialized successfully");
+      })
+      .catch((error) => {
+        console.error("Database initialization failed", error);
+      });
   });
 
   server.on("error", (error) => {
@@ -1286,7 +1292,4 @@ async function startServer(preferredPort) {
   });
 }
 
-startServer(PORT).catch((error) => {
-  console.error("Failed to start server", error);
-  process.exit(1);
-});
+startServer(PORT);
